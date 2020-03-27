@@ -200,6 +200,19 @@ var indicators = [
   }
 ];
 
+var tooltip = document.createElement('div');
+tooltip.classList.add('tooltip');
+
+function showTooltip(text){
+  tooltip.innerHTML= `<span>${text}</span>`;
+  tooltip.style.display = "visible";
+}
+
+function hideTooltip(){
+  tooltip.innerHTML = null;
+  tooltip.style.display = "none";
+}
+
 var map = new mapboxgl.Map({
   container: "map",
   style: "mapbox://styles/azavea/ck7z6wmai0zje1ioas2t1bzoo",
@@ -212,7 +225,8 @@ var map = new mapboxgl.Map({
 
 var nav = new mapboxgl.NavigationControl({
   showCompass: false,
-  showZoom: true
+  showZoom: true,
+  visualizePitch: true
 });
 
 map.addControl(nav, "top-right");
@@ -267,6 +281,11 @@ function updatePopup(event) {
 function removePopup() {
   popup.remove();
   map.getCanvas().style.cursor = "";
+}
+
+function scale(domain=[0,1], interpolater=d3.interpolateGnBu){
+  const scale = d3.scaleSequential().domain(domain).interpolator(interpolater);
+  return scale;
 }
 
 function resetCirclePaintStyle(layerName) {
@@ -354,19 +373,27 @@ function setLegend(colors, breaksValues) {
   document.getElementById("legend").innerHTML = legend;
 }
 
-function setCirclePaintStyle(layerName) {
-  var colors = indicators[indicator].colors,
-    radii = indicators[indicator].radii,
-    breaksValues = getBreaks(),
-    radiiZ1 = _.map([...Array(breaksValues.length).keys()], function(i) {
-      return (i / breaksValues.length) * 19 + 1;
-    }),
-    radiiZ2 = _.map([...Array(breaksValues.length).keys()], function(i) {
-      return (i / breaksValues.length) * 5 + 5;
-    });
 
-  map.setLayoutProperty(layerName, "visibility", "visible");
-  setLegend(colors, breaksValues);
+
+hexBinTimeout = 0;
+
+function setCirclePaintStyle(layerName) {
+  // var colors = indicators[indicator].colors,
+  //   radii = indicators[indicator].radii,
+  //   breaksValues = getBreaks(),
+  //   radiiZ1 = _.map([...Array(breaksValues.length).keys()], function(i) {
+  //     return (i / breaksValues.length) * 19 + 1;
+  //   }),
+  //   radiiZ2 = _.map([...Array(breaksValues.length).keys()], function(i) {
+  //     return (i / breaksValues.length) * 5 + 5;
+  //   });
+
+  // map.setLayoutProperty(layerName, "visibility", "visible");]
+  showHospitalHexbins();
+  const domain = [0, 0.2, 0.4, 0.6, 0.8, 1];
+  const hexColorScale = scale([0,1]);
+  colors = domain.map(hexColorScale);
+  setLegend(colors, domain);
 
   map.setPaintProperty(layerName, "circle-radius", [
     "interpolate",
@@ -551,6 +578,47 @@ function handleFirstTab(e) {
     document.body.classList.add("user-is-tabbing");
     window.removeEventListener("keydown", handleFirstTab);
   }
+}
+
+
+
+
+function showHospitalHexbins(){
+  clearTimeout(hexBinTimeout)
+  hexBinTimeout = setInterval(()=>{
+    const hexColorScale = scale([0,1]);
+    const features = map.querySourceFeatures("boundaries", {sourceLayer: "facility"});
+
+    if(map.getLayer('columns')){
+      map.removeLayer('columns');
+    }
+    const columnLayer = new deck.MapboxLayer({
+      id: 'columns',
+      type: deck.ColumnLayer,
+      data: features.map(v=>({properties: v.properties, centroid: v.geometry.coordinates})),
+      radius: 7000,
+      extruded: true,
+      pickable: true,
+      elevationScale: 5,
+      widthUnit: 'pixels',
+      getPosition: d => d.centroid,
+      getColor: d => {
+        const { properties } = d;
+        const icuOccupancyRate = +properties["ICU Bed Occupancy Rate"];
+        const color = icuOccupancyRate ? [...hexColorScale(icuOccupancyRate).match(/[0-9]{1,3}/g).map(v=>parseInt(v)), 150] : [150, 150, 150, 20];
+        return color;
+      }, 
+      getElevation: d => d.properties["Staffed All Beds"]*50,
+      onHover: ({object, x, y}) => {
+        // const tooltip = `height: ${object.value * 5000}m`;
+        /* Update tooltip
+          http://deck.gl/#/documentation/developer-guide/adding-interactivity?section=example-display-a-tooltip-for-hovered-object
+        */
+      }
+    });
+
+    map.addLayer(columnLayer);
+  }, 100)
 }
 
 window.addEventListener("keydown", handleFirstTab);
